@@ -18,5 +18,8 @@
   "bugs": {
     "url": "https://github.com/wshager/raddle-fluent/issues"
   },
-  "homepage": "https://github.com/wshager/raddle-fluent#readme"
+  "homepage": "https://github.com/wshager/raddle-fluent#readme",
+  "dependencies": {
+    "l3n": "^0.1.1"
+  }
 }

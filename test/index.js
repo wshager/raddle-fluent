@@ -1,7 +1,13 @@
 const Builder = require("../src/index").Builder;
 
-const $ = new Builder();
+let $ = new Builder("rql");
 
-console.log(JSON.stringify($.export("test", $ => $.def($ => $.string().string().run(),$ => $.string().run()).run()).test("a","b").test(1,2).run()));
+$ = $.export("match",
+	$ => $.def($ => $.def($ => $.obj(), $ => $.boolean()), $ => $.def($ => $.any($ => $.obj()), $ => $.any($ => $.obj())))
+).export("where",
+	$ => $.def($ => $.string().def($ => $.atomic(), $ => $.boolean()), $ => $.def($ => $.obj(), $ => $.boolean()))
+).export("eq",
+	$ => $.def($ => $.atomic(), $ => $.def($ => $.atomic(), $ => $.boolean()))
+);
 
-//console.log(typeof String == "function");
+console.log(JSON.stringify($.$expose("match#1").match().where("a").eq(1).where("b").eq(2).$mongo));
