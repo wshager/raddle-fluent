@@ -1,5 +1,23 @@
 const isSeq = ast => ast.$name === "";
 
+const makeSeq = (args = []) => ({$name:"", $args:args});
+//FIXME
+//const unwrapIfSeq = value => isSeq(value) ? value.$args[0] : value;
+
+// TODO:
+// - add 'appender' body to export to do the insertion of the call
+// - provide core functions as a module (how to type?)
+// - provide constraints in normalize
+const mongoConverters = {
+	where(args, convert) {
+		console.log(JSON.stringify(args));
+		if(args.length != 2) throw "Incorrect length";
+		return {
+			[args.slice(0,1)]: convert(makeSeq(args.slice(1)))
+		};
+	}
+};
+
 const normalize = (expr, cx) => {
 	if(typeof expr == "function") {
 		cx = cx.$new();
@@ -28,11 +46,8 @@ const core = {
 	export(name, type) {
 		// we want to export core functionality first
 		// what we need is just import/export/var as core and quot as separate thing
-		// we want to bind quots to this builder, so the builder that we predefined
 		// exposes the required functions
-		// import/export/var don't append, but bind
 		// TODO use typedef to detect quot
-		// TODO make bind private
 		type = normalize(type, this);
 		const paramTypes = isSeq(type.$args[0]) ? type.$args[0].$args : [type.$args[0]];
 		const len = paramTypes.length;
@@ -46,8 +61,20 @@ const core = {
 		this.$exportsByType[retTypeStr].push(name+"#"+len);
 		return this;
 	},
-	seq() {
-		return this.$append({$name:"", $args:[]});
+	seq(up = 0) {
+		// move insert to next arg
+		const ancestorLen = this.$ancestors.length;
+		if(ancestorLen) {
+			const ancestor = this.$ancestors[ancestorLen - 1 - up];
+			const { self } = this.$ancestorProps.get(ancestor);
+			self.$args.push(makeSeq());
+			this.$insert = self.$args[self.$args.length - 1].$args;
+			return this;
+		}
+		return this.$append(makeSeq());
+	},
+	restParams() {
+		return this.$append({$name:"rest-params", $args:[]});
 	}
 };
 
@@ -66,10 +93,10 @@ types.forEach(op => {
 });
 
 class Builder {
-	constructor(prefix = "local", modules = {}, exports = {}, exportsByType = {}, ancestors = [], ancestorInserts = new Map()) {
+	constructor(prefix = "local", modules = {}, exports = {}, exportsByType = {}, ancestors = [], ancestorProps = new Map(), defaultPrefix = "core") {
 		this.$ancestors = ancestors;
-		this.$ancestorInserts = ancestorInserts;
-		this.$root = {$name:"",$args:[]};
+		this.$ancestorProps = ancestorProps;
+		this.$root = makeSeq();
 		this.$insert = this.$root.$args;
 		this.$modules = modules;
 		this.$modulePrefix = prefix;
@@ -77,10 +104,11 @@ class Builder {
 		this.$exportsByType = exportsByType;
 		// FIXME expose on demand
 		this.$modules.core = core;
+		this.$defaultPrefix = defaultPrefix;
 		Object.assign(this, core);
 	}
 	$new(root, insert) {
-		const cx = new Builder(this.$modulePrefix, this.$modules, this.$exports, this.$exportsByType, this.$ancestors, this.$ancestorInserts);
+		const cx = new Builder(this.$modulePrefix, this.$modules, this.$exports, this.$exportsByType, this.$ancestors, this.$ancestorProps);
 		if(root) cx.$root = root;
 		if(insert) cx.$insert = insert;
 		return cx;
@@ -95,6 +123,7 @@ class Builder {
 		// TODO parse rules
 		// find by return type
 		const exports = this.$exportsByType[JSON.stringify(type)] || [];
+		//console.log(exposedBy, exports);
 		for(const exprt of exports) {
 			this.$expose(exprt, exposedBy);
 		}
@@ -104,17 +133,8 @@ class Builder {
 		this.$insert.push(arg);
 		return this;
 	}
-	$push(child) {
-		this.$ancestors.push(this.$insert);
-		this.insert = child;
-		return this;
-	}
-	$pop() {
-		this.$insert = this.$ancestors.pop();
-		return this;
-	}
 	$expose(exprt, exposedBy) {
-		// TODO VNode + detect type
+		// TODO VNode + detect type + private
 		// TODO js name to qname
 		// TODO handle seqs
 		// actually we don't want to bind it to 'this' yet
@@ -128,18 +148,27 @@ class Builder {
 		const [name, len] = exprt.split("#");
 		const type = this.$exports[name][len];
 		const paramTypes = isSeq(type.$args[0]) ? type.$args[0].$args : [type.$args[0]];
+		const returnType = isSeq(type.$args[1]) ? type.$args[1].$args[0] : type.$args[1];
+		const lastParam = paramTypes[paramTypes.length - 1];
+		const lastParamType = isSeq(lastParam) ? lastParam.$args[0] : lastParam;
+		const hasRestParams = lastParamType.$name === "rest-params";
 		if(!this[name]) {
 			this[name] = (...args) => {
-				// if this function is was ever partially applied
-				if(exposedBy && this.$ancestorInserts.has(exposedBy)) {
-					// for debugging
-					//const initlen = this.$ancestors.length - 1;
-					// go up ancestors and expose popped again
-					let i = this.$ancestors.length;
-					while(i && this.$ancestors[--i] !== exposedBy) {
-						const ancestor = this.$ancestors.pop();
-						this.$insert = this.$ancestorInserts.get(ancestor);
-						this.$ancestorInserts.delete(ancestor);
+				// if this function's caller was ever partially applied
+				if(exposedBy && this.$ancestorProps.has(exposedBy)) {
+					const { curParamType } = this.$ancestorProps.get(exposedBy);
+					if(JSON.stringify(curParamType) !== JSON.stringify(returnType)) {
+						// for debugging
+						//const initlen = this.$ancestors.length - 1;
+						// go up ancestors and expose popped again
+						let i = this.$ancestors.length;
+						while(i && this.$ancestors[--i] !== exposedBy) {
+							const ancestor = this.$ancestors.pop();
+							console.log("pop", ancestor);
+							const { insert } = this.$ancestorProps.get(ancestor);
+							this.$insert = insert;
+							this.$ancestorProps.delete(ancestor);
+						}
 					}
 					//if(i < initlen) console.log(exprt, "removed up to",this.$ancestors[i]);
 				}
@@ -151,13 +180,19 @@ class Builder {
 				// last is a reference to AST of this call (i.e. self)
 				const last = this.$insert[this.$insert.length - 1];
 				const alen = last.$args.length;
-				if(alen < len) {
+				if(alen < len || hasRestParams) {
+					console.log("open", name);
 					// NOTE that partials won't become full (so we have to call 'seq')
-					if(!this.$ancestorInserts.has(exprt)) {
+					if(!this.$ancestorProps.has(exprt)) {
 						this.$ancestors.push(exprt);
-						this.$ancestorInserts.set(exprt, this.$insert);
+						const curParamType = paramTypes[paramTypes.length - 1];
+						this.$ancestorProps.set(exprt, {
+							insert: this.$insert,
+							self: last,
+							curParamType: curParamType
+						});
 					}
-					const ref = {$name:"", $args: []};
+					const ref = makeSeq();
 					last.$args.push(ref);
 					// not finished = expose only allowed
 					return this.$new(this.$root, ref.$args).$exposeBy(exprt, paramTypes[alen]);
@@ -178,46 +213,36 @@ class Builder {
 		}
 		return this;
 	}
+	$setDefaultPrefix(prefix) {
+		this.$defaultPrefix = prefix;
+		return this;
+	}
 	get $ast() {
 		const root = this.$root;
 		return root.$args.length === 1 ? root.$args[0] : root;
 	}
-	get $mongo() {
+	$mongo(converters = mongoConverters) {
 		// TODO mixin
 		const convert = (part) => {
-			if(Array.isArray(part)) return part.map(arg => convert(arg));
+			if(Array.isArray(part)) {
+				console.log(part);
+				return part.map(arg => convert(arg));
+			}
 			if(!part.$args) return part;
 			// seq args to array, unless 'where'
 			let qname = part.$name;
 			let args = part.$args;
 			if(qname === "") {
-				console.log(args);
 				return args.reduce((acc, arg) => Object.assign(acc, convert(arg)), {});
 			}
-			if(qname === "where") {
-				const path = args[0];
-				args = args.slice(1);
-				return {
-					[path]: args.reduce((acc, arg) => Object.assign(acc, convert(arg)), {})
-				};
+			//const name2 = qname + "#" + args.length;
+			if(converters.hasOwnProperty(qname)) {
+				return converters[qname](args, convert);
 			}
 			return {
 				["$"+qname]: args.length == 1 ? convert(args[0]) : convert(args)
 			};
 		};
-		// aggregation operators
-		/*const ops = {
-			eq: 1,
-			ne: 1,
-			gt: 1,
-			lt: 1,
-			gte: 1,
-			lte: 1,
-			exists: 1,
-			type: 1,
-			in: 2,
-			nin: 2,
-		};*/
 		// TODO convert recursively
 		return convert(this.$root);
 	}
