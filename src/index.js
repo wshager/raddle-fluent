@@ -62,7 +62,8 @@ class Builder {
 			}
 		}
 		if(!exports) {
-			console.log(exposedBy, "has no exports");
+			console.log(exposedBy, "has no exports", JSON.stringify(type));
+			//console.log(Object.keys(this.$exportsByType));
 			exports = [];
 		}
 		//console.log(exposedBy, exports);
@@ -93,8 +94,10 @@ class Builder {
 	$checkPartials(exposedBy, returnType) {
 		// if this function's caller was ever partially applied
 		if(exposedBy && this.$ancestorProps.has(exposedBy)) {
-			const { curParamType } = this.$ancestorProps.get(exposedBy);
-			console.log(JSON.stringify(curParamType),JSON.stringify(returnType));
+			const { self, curParamType } = this.$ancestorProps.get(exposedBy);
+			const [name, len] = exposedBy.split("#");
+			console.log(name, len, self.$args.lastItem);
+			//console.log(JSON.stringify(curParamType),JSON.stringify(returnType));
 			if(JSON.stringify(curParamType) !== JSON.stringify(returnType)) {
 				// for debugging
 				//const initlen = this.$ancestors.length - 1;
@@ -115,10 +118,27 @@ class Builder {
 		// move insert to next arg
 		const ancestorLen = this.$ancestors.length;
 		if(ancestorLen) {
-			const ancestor = this.$ancestors[ancestorLen - 1 - up];
-			const { self } = this.$ancestorProps.get(ancestor);
-			self.$args.push(makeSeq());
-			this.$insert = self.$args.lastItem.$args;
+			let at = ancestorLen - 1 - up;
+			const ancestor = this.$ancestors[at];
+			const { self, curParamType } = this.$ancestorProps.get(ancestor);
+			const args = self.$args;
+			args.push(makeSeq());
+			const index = args.length;
+			this.$insert = args.lastItem.$args;
+			const [name, len] = ancestor.split("#");
+			if(index < len) {
+				this.$ancestorProps.set(ancestor, {insert: this.$insert, self, curParamType, index: index + 1});
+				// still remove up to up...
+				at = ancestorLen - 1;
+			} else {
+				console.log(name, "completed by seq");
+				this.$checkBinds(name, args);
+			}
+			const removed = this.$ancestors.splice(at);
+			removed.forEach(anc => {
+				console.log("removing",anc);
+				this.$ancestorProps.delete(anc);
+			});
 			return this;
 		}
 		return this.$append(makeSeq());
@@ -150,6 +170,7 @@ class Builder {
 		}
 	}
 	$expose(exprt, exposedBy) {
+		// TODO detect when a function is 'completed' before checkbinds and exposeBy
 		// TODO VNode + detect type + private
 		// TODO js name to qname
 		// TODO handle seqs
@@ -166,48 +187,49 @@ class Builder {
 		const name = dashedToCamelCase(qname);
 		const paramTypes = isSeq(type.$args[0]) ? type.$args[0].$args : [type.$args[0]];
 		const returnType = isSeq(type.$args[1]) ? type.$args[1].$args[0] : type.$args[1];
-		const lastParam = paramTypes.lastItem;
-		const lastParamType = isSeq(lastParam) ? lastParam.$args[0] : lastParam;
-		const hasRestParams = lastParamType && lastParamType.$name === "rest-params";
+		const lastParamType = paramTypes.lastItem;
+		const lastParamTypeName = lastParamType ? lastParamType.$name : null;
+		const hasRestParams = lastParamTypeName && lastParamTypeName === "rest-params";
 		if(!this[name]) {
 			this[name] = (...args) => {
 				this.$checkPartials(exposedBy, returnType);
 				args = args.map((arg, idx) => this.$normalize(exprt, paramTypes[idx], arg));
-				// some binds will not return args
-				this.$checkBinds(name, args);
 				//if(!ref) throw new Error(`Incorrect number of parameters for ${name}, received ${args.length}, have ${len}`);
-				this.$appendCall(name, args);
+				this.$appendCall(qname, args);
 				// set insert to inserted args
 				// cancel when going up
 				// TODO keep track of args filled in
 				// last is a reference to AST of this call (i.e. self)
 				const last = this.$insert.lastItem;
-				const alen = last ? last.$args.length : 0;
-				if(alen < len || hasRestParams) {
-					console.log("open", name, len, alen, this.$insert);
+				let index = last ? last.$args.length : 0;
+				index = hasRestParams ? Math.min(index, len - 2) : index;
+				if(index < len || hasRestParams) {
 					// NOTE that partials won't become full (so we have to call 'seq')
+					const curParamType = paramTypes[index];
+					console.log("open", qname, len, index);
 					if(!this.$ancestorProps.has(exprt)) {
 						this.$ancestors.push(exprt);
-						const curParamType = paramTypes.lastItem;
 						this.$ancestorProps.set(exprt, {
 							insert: this.$insert,
 							self: last,
-							curParamType: curParamType
+							curParamType: curParamType,
+							index: index
 						});
 					}
 					const ref = makeSeq();
 					last.$args.push(ref);
 					// not finished = expose only allowed
-					return this.$new(this.$root, ref.$args).$exposeBy(exprt, paramTypes[alen]);
+					return this.$new(this.$root, ref.$args).$exposeBy(exprt, curParamType);
 				}
+				// some binds will not return args
+				this.$checkBinds(qname, args);
 				// finished = re-expose by ancestors (if have) on last param
 				if(this.$ancestors.length) {
 					let cx = this.$new(this.$root, this.$insert);
 					this.$ancestors.forEach(ancestor => {
-						const [name, len] = ancestor.split("#");
-						const type = cx.$exports[name][len];
-						const paramTypes = isSeq(type.$args[0]) ? type.$args[0].$args : [type.$args[0]];
-						cx = cx.$exposeBy(ancestor, paramTypes.lastItem);
+						const { curParamType } = this.$ancestorProps.get(ancestor);
+						//console.log("re-expose",ancestor,curParamType);
+						cx = cx.$exposeBy(ancestor, curParamType);
 					});
 					return cx;
 				}
@@ -249,10 +271,10 @@ class Builder {
 		// TODO convert recursively
 		return convert(this.$root);
 	}
-	$module(top) {
+	$factory(top) {
 		this.$root = makeSeq();
 		this.$insert = this.$root.$args;
-		return this.$expose(top);
+		return () => this.$expose(top);
 	}
 	get $typeDef() {
 		return makeCall("$type-def");
@@ -269,30 +291,26 @@ class Builder {
 // but the type calls themselves don't have types
 const createCore = () => {
 	// these basically belong to the grammar instead of types
-	const coreOccurrenceIndicators = ["any","many","maybe","one"];
 	// types are allowed in specific situations (typedef)
 	// core types are js-specific here and never take arguments
 	// TODO extend object / array with more specific constraints (e.g. schema)
+	const coreOccurrenceIndicators = ["any","many","maybe","one"];
 	const coreTypes = ["atomic","string","number","boolean", "item", "object", "array"];
-	let core = new Builder("core");
+	const makeDef = (paramTypeSeq, returnType) => makeCall("function",[paramTypeSeq, returnType]);
+	let $ = new Builder("core");
 	// create generic type first
 	// no use exposing export yet, because indicators + function won't be defined
 	// these won't be in the AST...
-	const makeDef = (paramTypeSeq, returnType) => makeCall("function",[paramTypeSeq, returnType]);
-	coreOccurrenceIndicators.forEach(indicator => {
-		core = core.$export(indicator, makeDef(core.$typeDef, core.$typeDef));
-	});
-	core = core.$export("function", makeDef(makeSeq([makeCall("any",[core.$typeDef]),core.$typeDef]), core.$typeDef))
-		.$export("rest-params", makeDef(makeSeq(), core.$typeDef))
-		.$export("export", makeDef(makeSeq([core.$qname, core.$typeDef]), makeSeq()));
-	coreTypes.forEach(type => {
-		core = core.$export(type, makeDef(makeSeq(), core.$typeDef));
-	});
-	return core.$module("export#2");
+	$ = coreOccurrenceIndicators.reduce(($, indicator) => $.$export(indicator, makeDef($.$typeDef, $.$typeDef)),$);
+	$ = $.$export("function", makeDef(makeSeq([makeCall("any",[$.$typeDef]),$.$typeDef]), $.$typeDef))
+		.$export("rest-params", makeDef(makeSeq(), $.$typeDef))
+		.$export("export", makeDef(makeSeq([$.$qname, $.$typeDef]), makeSeq()));
+	$ = coreTypes.reduce(($, type) => $.$export(type, makeDef(makeSeq(), $.$typeDef)),$);
+	return $.$factory("export#2");
 	// TODO expose must know exports
 	// we can create import from AST
 };
 
-exports.core = () => createCore();
+exports.core = createCore();
 
 exports.Builder = Builder;
