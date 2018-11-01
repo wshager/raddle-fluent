@@ -14,7 +14,7 @@ const rql = core().export("aggregate",
 //	$ => $.function($ => $.function($ => $.object(), $ => $.boolean()).function($ => $.object(), $ => $.boolean()).restParams(), $ => $.function($ => $.object(), $ => $.boolean()))
 ).export("and")
 	.function()
-	.function($ => $.object(), $ => $.boolean())
+	.function().object().seq().boolean()
 	.function($ => $.object(), $ => $.boolean())
 	.restParams().seq()
 	.function($ => $.object(), $ => $.boolean())
@@ -23,11 +23,12 @@ const rql = core().export("aggregate",
 const aggregation = rql()
 	.aggregate()
 	.match()
-	.and()
-	.eq("$a",1).seq()
-	.eq("$b",2)
+	//.and()
+	//.eq("$a",1).seq()
+	//.eq("$b",2)
+	//.$mongo();
+	.where("b").eq(2)
+	.where("a").eq(1)
 	.$mongo();
-//.where("b").eq(2).seq(1)
-//.where("a").eq(1);
 
 console.log(JSON.stringify(aggregation));
