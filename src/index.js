@@ -75,6 +75,7 @@ class Builder {
 				exports = emptyExports ? exports.concat(emptyExports) : exports;
 			}
 		}
+		if(!exports.length) console.log(JSON.stringify(type))
 		for(const exprt of exports) {
 			this.$expose(exprt, ancestorIndex);
 		}
@@ -115,8 +116,10 @@ class Builder {
 		const ancestorLen = this.$ancestors.length;
 		if(ancestorLen && ancestorLen - up > 1) {
 			const at = ancestorLen - 1 - up;
+			// remove after me
 			const removed = this.$ancestors.splice(at + 1);
 			removed.forEach(anc => {
+				console.log("pop",anc.$name)
 				this.$completeAndRemove(anc);
 			});
 			const ancestor = this.$ancestors[at];
@@ -129,14 +132,14 @@ class Builder {
 				args.push(makeSeq());
 				this.$insert = args.lastItem.$args;
 				this.$ancestorProps.set(ancestor, {insert: this.$insert, curParamType});
-				// remove after me
 				return this.$new(this.$root, this.$insert, this.$ancestors, this.$ancestorProps).$exposeBy(curParamType);
-			} else {
-				// used to explicitly complete a function
-				return this.seq(1);
 			}
+			console.log("complete",name)
+			this.$checkBinds(name, args);
+			// used to explicitly complete a function
+			return this.seq(1);
 		}
-		return this;
+		return this.$reExposeAncestors();
 	}
 	$completeAndRemove(ancestor) {
 		const args = ancestor.$args;
@@ -208,6 +211,7 @@ class Builder {
 		const hasRestParams = lastParamTypeName && lastParamTypeName === "rest-params";
 		if(!this[name]) {
 			this[name] = (...args) => {
+				console.log("call",qname)
 				this.$checkPartials(ancestorIndex);
 				args = args.map((arg, idx) => this.$normalize(exprt, paramTypes[idx], arg));
 				//if(!ref) throw new Error(`Incorrect number of parameters for ${name}, received ${args.length}, have ${len}`);
@@ -245,6 +249,7 @@ class Builder {
 			let cx = this.$new(this.$root, this.$insert, this.$ancestors, this.$ancestorProps);
 			this.$ancestors.forEach((ancestor, i) => {
 				const { curParamType } = this.$ancestorProps.get(ancestor);
+				//console.log("re-expose",ancestor.$name)
 				cx = cx.$exposeBy(curParamType, i + 1);
 			});
 			return cx;
@@ -318,9 +323,11 @@ const createCore = () => {
 	$ = coreOccurrenceIndicators.reduce(($, indicator) => $.$export(indicator, makeDef($.$typeDef, $.$typeDef)),$);
 	$ = $.$export("function", makeDef(makeSeq([makeCall("any",[$.$typeDef]),$.$typeDef]), $.$typeDef))
 		.$export("rest-params", makeDef(makeSeq(), $.$typeDef))
-		.$export("export", makeDef(makeSeq([$.$qname, $.$typeDef]), makeSeq()));
+		.$export("export", makeDef(makeSeq([$.$qname, $.$typeDef]), makeCall("$>")))
+		.$export("module", makeDef(makeCall("$>"), makeSeq()));
 	$ = coreTypes.reduce(($, type) => $.$export(type, makeDef(makeSeq(), $.$typeDef)),$);
-	return $.$factory("export#2");
+	return () => $.$factory("module#1")().module();
+	//return $.$factory("export#2")
 	// TODO expose must know exports
 	// we can create import from AST
 };
