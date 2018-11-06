@@ -20,7 +20,6 @@ const occurenceMap = {
 // - provide constraints in normalize
 const mongoConverters = {
 	where(args, convert) {
-		//console.log(JSON.stringify(args));
 		if(args.length != 2) throw "Incorrect length";
 		return {
 			[args.slice(0,1)]: convert(makeSeq(args.slice(1)))
@@ -74,15 +73,8 @@ class Builder {
 			if(occurence === 2 || occurence === 3) {
 				const emptyExports = this.$exportsByType[JSON.stringify(makeSeq())];
 				exports = emptyExports ? exports.concat(emptyExports) : exports;
-				//if(emptyExports) console.log("emptyExports", emptyExports);
 			}
 		}
-		if(!exports) {
-			console.log(type, "has no exports", JSON.stringify(type));
-			//console.log(Object.keys(this.$exportsByType));
-			exports = [];
-		}
-		//console.log("exposes", exports, type);
 		for(const exprt of exports) {
 			this.$expose(exprt, ancestorIndex);
 		}
@@ -109,63 +101,14 @@ class Builder {
 	}
 	$checkPartials(ancestorIndex) {
 		if(ancestorIndex) {
-			console.log("ancestorIndex", ancestorIndex);
 			let i = this.$ancestors.length;
 			const { insert } = this.$ancestorProps.get(this.$ancestors[ancestorIndex - 1]);
 			this.$insert = insert;
 			for(; i > ancestorIndex; --i) {
 				const ancestor = this.$ancestors.pop();
-				console.log("pop", ancestor);
 				this.$ancestorProps.delete(ancestor);
 			}
 		}
-		// if the types don't match, we may have a partial
-		// even if calling type has occurence indicator, all return types match
-		// in case of any|maybe, also empty returns match
-		/*
-		if(exposedByType) {
-			const exposedHasOcc = occurrenceRe.test(exposedByType.$name);
-			const exposedOccurrence = exposedHasOcc ? occurenceMap[exposedByType.$name] : 1;
-			const exposedByStr = JSON.stringify(exposedHasOcc ? exposedByType.$args[0] : exposedByType);
-			const retHasOcc = occurrenceRe.test(returnType.$name);
-			//const retOccurrence = retHasOcc ? returnType.$name : "one";
-			returnType = retHasOcc ? returnType.$args[0] : returnType;
-			const retTypeStr = JSON.stringify(returnType);
-			let match = exposedByStr === retTypeStr || ((exposedOccurrence === 2 || exposedOccurrence === 3) && isSeq(returnType));
-			console.log("match", exposedByStr, retTypeStr);
-			if(!match) {
-				// if this function's caller was ever partially applied
-				// NOTE this is an early optimization, it would be passible to just iterate ancestors
-				// exposedByType is a reference to the original caller
-				// it should be on the last ancestor
-				//if(this.$ancestorTypes.has(exposedByType)) {
-				//const self = this.$ancestorTypes.get(exposedByType);
-				// always remove parent: it may be readded
-				// go up ancestors and expose popped again
-				let i = this.$ancestors.length;
-				if(i > 0) {
-					for(; i > 0; --i) {
-						const ancestor = this.$ancestors.pop();
-						console.log("pop", ancestor);
-						const { insert, curParamType } = this.$ancestorProps.get(ancestor);
-						// check if these types match
-						this.$completeAndRemove(ancestor);
-						if(JSON.stringify(curParamType) === JSON.stringify(returnType)) {
-							this.$insert = insert;
-							match = true;
-							break;
-						}
-					}
-				} else {
-					match = false;
-				}
-			}
-			if(!match) {
-				//console.log(JSON.stringify(exposedByType), JSON.stringify(returnType));
-				throw new TypeError("Types don't match and no ancestors");
-			}
-			//if(i < initlen) console.log(exprt, "removed up to",this.$ancestors[i]);
-		}*/
 	}
 	seq(up = 0) {
 		// move insert to next arg
@@ -174,16 +117,13 @@ class Builder {
 			const at = ancestorLen - 1 - up;
 			const removed = this.$ancestors.splice(at + 1);
 			removed.forEach(anc => {
-				console.log("seq pop", anc);
 				this.$completeAndRemove(anc);
 			});
 			const ancestor = this.$ancestors[at];
 			const name = ancestor.$name;
 			const exports = this.$exports[name];
 			const len = +Object.keys(exports).lastItem;
-			//console.log("call seq", name);
 			const args = ancestor.$args;
-			// used to explicitly complete a function
 			if(args.length < len) {
 				const { curParamType } = this.$ancestorProps.get(ancestor);
 				args.push(makeSeq());
@@ -192,25 +132,23 @@ class Builder {
 				// remove after me
 				return this.$new(this.$root, this.$insert, this.$ancestors, this.$ancestorProps).$exposeBy(curParamType);
 			} else {
-				console.log(name, "completed by seq");
+				// used to explicitly complete a function
 				return this.seq(1);
 			}
 		}
 		return this;
 	}
-	$completeAndRemove(ancestor) {
-		const args = ancestor.$args;
-		const index = args.length;
-		const name = ancestor.$name;
-		const exports = this.$exports[name];
-		const len = +Object.keys(exports).lastItem;
-		if(index == len) {
-			console.log(name, "completed", args);
-			this.$checkBinds(name, args);
-		}
-		console.log(name, "removed", index, len);
-		this.$ancestorProps.delete(ancestor);
-	}
+	$completeAndRemove(ancestor) {
+		const args = ancestor.$args;
+		const index = args.length;
+		const name = ancestor.$name;
+		const exports = this.$exports[name];
+		const len = +Object.keys(exports).lastItem;
+		if(index === len) {
+			this.$checkBinds(name, args);
+		}
+		this.$ancestorProps.delete(ancestor);
+	}
 	$cleanupAncestors() {
 		const removed = this.$ancestors.splice(0);
 		removed.reverse().forEach(anc => {
@@ -270,7 +208,6 @@ class Builder {
 		const hasRestParams = lastParamTypeName && lastParamTypeName === "rest-params";
 		if(!this[name]) {
 			this[name] = (...args) => {
-				console.log("call",qname,exprt);
 				this.$checkPartials(ancestorIndex);
 				args = args.map((arg, idx) => this.$normalize(exprt, paramTypes[idx], arg));
 				//if(!ref) throw new Error(`Incorrect number of parameters for ${name}, received ${args.length}, have ${len}`);
@@ -285,13 +222,11 @@ class Builder {
 				if(index < len || hasRestParams) {
 					// NOTE that partials won't become full (so we have to call 'seq')
 					const curParamType = paramTypes[index];
-					console.log("open", qname, len, index);
 					this.$ancestors.push(last);
 					this.$ancestorProps.set(last, {
 						insert: this.$insert,
 						curParamType: curParamType
 					});
-					//this.$ancestorTypes.set(curParamType, true);
 					const ref = makeSeq();
 					last.$args.push(ref);
 					// not finished = expose only allowed
@@ -310,7 +245,6 @@ class Builder {
 			let cx = this.$new(this.$root, this.$insert, this.$ancestors, this.$ancestorProps);
 			this.$ancestors.forEach((ancestor, i) => {
 				const { curParamType } = this.$ancestorProps.get(ancestor);
-				//console.log("re-expose",ancestor,curParamType);
 				cx = cx.$exposeBy(curParamType, i + 1);
 			});
 			return cx;
@@ -330,7 +264,6 @@ class Builder {
 		// TODO mixin
 		const convert = (part) => {
 			if(Array.isArray(part)) {
-				//console.log(part);
 				return part.map(arg => convert(arg));
 			}
 			if(!part.$args) return part;
