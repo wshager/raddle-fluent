@@ -14,7 +14,7 @@ const rql = core().export("aggregate",
 //	$ => $.function($ => $.function($ => $.object(), $ => $.boolean()).function($ => $.object(), $ => $.boolean()).restParams(), $ => $.function($ => $.object(), $ => $.boolean()))
 ).export("and")
 	.function()
-	.function().object().seq().boolean()
+	.function().object().seq().boolean().seq()
 	.function($ => $.object(), $ => $.boolean())
 	.restParams().seq()
 	.function($ => $.object(), $ => $.boolean())
