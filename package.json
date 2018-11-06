@@ -20,7 +20,6 @@
   },
   "homepage": "https://github.com/wshager/raddle-fluent#readme",
   "dependencies": {
-    "array-last-item": "0.0.7",
-    "l3n": "^0.1.1"
+    "array-last-item": "0.0.7"
   }
 }
