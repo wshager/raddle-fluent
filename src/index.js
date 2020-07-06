@@ -11,6 +11,16 @@ const occurenceMap = {
 	"many": 4,
 };
 
+const isObject = v => v && typeof v === "object";
+function traverse(ast, transform) {
+	let type = !isObject(ast) ? 3 : ast.$name ? 14 : 15;
+	const out = transform(ast, type);
+	type = !isObject(out) ? 3 : out.$name ? 14 : 15;
+	return type === 14 ? { $name: ast.$name, $args: out.$args.map(c => traverse(c, transform)) } : ast;
+}
+
+const deseq = ast => isSeq(ast) && ast.$args.length === 1 ? ast.$args[0] : ast;
+
 //FIXME
 //const unwrapIfSeq = value => isSeq(value) ? value.$args[0] : value;
 
@@ -75,7 +85,7 @@ class Builder {
 				exports = emptyExports ? exports.concat(emptyExports) : exports;
 			}
 		}
-		if(!exports.length) console.log(JSON.stringify(type))
+		if(!exports.length) console.log(JSON.stringify(type), JSON.stringify(this.$exports.match[1]));
 		for(const exprt of exports) {
 			this.$expose(exprt, ancestorIndex);
 		}
@@ -119,7 +129,7 @@ class Builder {
 			// remove after me
 			const removed = this.$ancestors.splice(at + 1);
 			removed.forEach(anc => {
-				console.log("pop",anc.$name)
+				console.log("pop",anc.$name);
 				this.$completeAndRemove(anc);
 			});
 			const ancestor = this.$ancestors[at];
@@ -134,7 +144,7 @@ class Builder {
 				this.$ancestorProps.set(ancestor, {insert: this.$insert, curParamType});
 				return this.$new(this.$root, this.$insert, this.$ancestors, this.$ancestorProps).$exposeBy(curParamType);
 			}
-			console.log("complete",name)
+			console.log("complete",name);
 			this.$checkBinds(name, args);
 			// used to explicitly complete a function
 			return this.seq(1);
@@ -211,7 +221,7 @@ class Builder {
 		const hasRestParams = lastParamTypeName && lastParamTypeName === "rest-params";
 		if(!this[name]) {
 			this[name] = (...args) => {
-				console.log("call",qname)
+				console.log("call",qname);
 				this.$checkPartials(ancestorIndex);
 				args = args.map((arg, idx) => this.$normalize(exprt, paramTypes[idx], arg));
 				//if(!ref) throw new Error(`Incorrect number of parameters for ${name}, received ${args.length}, have ${len}`);
@@ -262,8 +272,8 @@ class Builder {
 		return this;
 	}
 	get $ast() {
-		const root = this.$root;
-		return root.$args.length === 1 ? root.$args[0] : root;
+		const root = deseq(this.$root);//traverse(this.$root, (ast, type) => type === 14 ? deseq(ast) : ast);
+		return root;
 	}
 	$mongo(converters = mongoConverters) {
 		// TODO mixin

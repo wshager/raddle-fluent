@@ -2,13 +2,13 @@ const core = require("../src/index").core;
 
 const rql = core()
 	.export("aggregate",
-		//$ => $.function($ => $.any($ => $.function($ => $.any($ => $.object()), $ => $.any($ => $.object()))), $ => $.any($ => $.object()))
+		$ => $.function($ => $.any($ => $.function($ => $.any($ => $.object()), $ => $.any($ => $.object()))), $ => $.any($ => $.object()))
 	)
-		.function()
-			.function()
-				.any().object().seq()
-				.any().object().seq()
-			.any().object().seq()
+		// .function()
+		// 	.any().function()
+		// 		.any().object().seq()
+		// 		.any().object().seq()
+		// 	.any().object().seq()
 	.export("match",
 		$ => $.function($ => $.function($ => $.object(), $ => $.boolean()), $ => $.function($ => $.any($ => $.object()), $ => $.any($ => $.object())))
 	)
